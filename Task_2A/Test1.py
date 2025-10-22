@@ -57,14 +57,14 @@ def sysCall_init():
 
     # keyboard -> signal magnitudes (tweak as needed)
     YAW_MAG = 0.75
-    VEL_SETPOINT_MAG = 0.04
+    VEL_SETPOINT_MAG = 0.01
 
     # yaw compensation heuristic factor (tweak if needed)
     yaw_comp_factor = 0.5
 
     # Arm control parameters - ADJUST THESE TO CHANGE SPEED
-    ARM_SPEED = 0.5  # rad/s - Speed for raising/lowering arm
-    GRIPPER_SPEED = 0.02  # m/s - Speed for opening/closing gripper
+    ARM_SPEED = 1.0  # rad/s - Speed for raising/lowering arm
+    GRIPPER_SPEED = 0.5  # m/s - Speed for opening/closing gripper
     
     # Arm control button states
     ui_raise = False
