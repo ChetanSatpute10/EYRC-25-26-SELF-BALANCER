@@ -290,23 +290,23 @@ def sysCall_actuation():
     global YAW_MAG, VEL_SETPOINT_MAG, MAX_MOTOR_VEL
     global ui_forward, ui_backward, ui_left, ui_right
 
-    # Primary: Use UI button states
-    up = 1 if ui_forward else 0
-    down = 1 if ui_backward else 0
-    left = 1 if ui_left else 0
-    right = 1 if ui_right else 0
+    # # Primary: Use UI button states
+    # up = 1 if ui_forward else 0
+    # down = 1 if ui_backward else 0
+    # left = 1 if ui_left else 0
+    # right = 1 if ui_right else 0
 
-    # Fallback: Try reading from signals (if someone sets them externally)
-    if not (up or down or left or right):
-        up_val = SIM.getIntegerSignal('key_up')
-        down_val = SIM.getIntegerSignal('key_down')
-        left_val = SIM.getIntegerSignal('key_left')
-        right_val = SIM.getIntegerSignal('key_right')
+    # # Fallback: Try reading from signals (if someone sets them externally)
+    # if not (up or down or left or right):
+    #     up_val = SIM.getIntegerSignal('key_up')
+    #     down_val = SIM.getIntegerSignal('key_down')
+    #     left_val = SIM.getIntegerSignal('key_left')
+    #     right_val = SIM.getIntegerSignal('key_right')
 
-        up = 1 if up_val is not None and up_val != 0 else 0
-        down = 1 if down_val is not None and down_val != 0 else 0
-        left = 1 if left_val is not None and left_val != 0 else 0
-        right = 1 if right_val is not None and right_val != 0 else 0
+    #     up = 1 if up_val is not None and up_val != 0 else 0
+    #     down = 1 if down_val is not None and down_val != 0 else 0
+    #     left = 1 if left_val is not None and left_val != 0 else 0
+    #     right = 1 if right_val is not None and right_val != 0 else 0
 
     # setpoint & yaw based on keyboard input
     if up == 1:

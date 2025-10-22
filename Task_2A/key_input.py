@@ -17,11 +17,16 @@ def sysCall_init():
     global filtered_pitch_rate, filtered_wheel_velocity, previous_pitch
     global yaw_magnitude, linear_velocity_magnitude, yaw_correction_factor
     global accumulated_pitch_error, integral_gain, integral_clamp_limit
+    global ARM_JOINT, PRISMATIC_JOINT
+    global arm_handle, gripper_handle
+    global ARM_SPEED, GRIPPER_SPEED
 
     SIM = sim
     robot_body = sim.getObjectHandle("body")
     motor_left = sim.getObjectHandle("left_joint")
     motor_right = sim.getObjectHandle("right_joint")
+    ARM_JOINT = sim.getObjectHandle("arm_joint")
+    PRISMATIC_JOINT = sim.getObjectHandle("Prismatic_joint")
 
     # controller parameters added (same LQR_K you provided)
     lqr_gain_matrix = [-2.8404703083006493, -0.04011592828490343, -3.3368304906550407e-17, 2.2360679774997827]
@@ -42,14 +47,18 @@ def sysCall_init():
 
     # keyboard signal magnitudes
     yaw_magnitude = 0.75
-    linear_velocity_magnitude = 0.04
+    linear_velocity_magnitude = 0.01
 
     # yaw correction heuristic
     yaw_correction_factor = 0.5
+    ARM_SPEED = 0.5
+    GRIPPER_SPEED = 0.5
 
     # ensure motors start at zero velocity
     sim.setJointTargetVelocity(motor_left, 0)
     sim.setJointTargetVelocity(motor_right, 0)
+    sim.setJointTargetVelocity(PRISMATIC_JOINT, 0)
+    sim.setJointTargetVelocity(ARM_JOINT, 0)
     
     print("Self-Balancing Bot Initialized! Use keyboard to control:")
     print("↑ Forward, ↓ Backward, ← Left, → Right, Q/E to adjust, W/S for speed")
@@ -60,6 +69,7 @@ def sysCall_actuation():
     global SIM, motor_left, motor_right
     global linear_velocity_target, yaw_target
     global yaw_magnitude, linear_velocity_magnitude, max_motor_velocity
+
 
     # --- Keyboard Input Detection ---
     message, data, data2 = SIM.getSimulatorMessage()
@@ -99,6 +109,29 @@ def sysCall_actuation():
 
     SIM.setJointTargetVelocity(motor_left, left_motor_velocity)
     SIM.setJointTargetVelocity(motor_right, right_motor_velocity)
+
+    # Arm and gripper control
+    global ARM_JOINT, PRISMATIC_JOINT, ARM_SPEED, GRIPPER_SPEED
+
+    message, data, data2 = SIM.getSimulatorMessage()
+    if (message == SIM.message_keypress):
+        key = data[0]
+        arm_vel = 0.0
+        if key == 105:  # 'i' key to raise arm
+            arm_vel = ARM_SPEED
+        elif key == 107:  # 'k' key to lower arm
+            arm_vel = -ARM_SPEED
+        elif key == 32:
+            arm_vel = 0.0
+        SIM.setJointTargetVelocity(ARM_JOINT, arm_vel)
+        gripper_vel = 0.0
+        if key == 111:  # 'o' key to open gripper
+            gripper_vel = GRIPPER_SPEED
+        elif key == 108:  # 'l' key to close gripper
+            gripper_vel = -GRIPPER_SPEED
+        elif key == 32:
+            arm_vel = 0.0
+        SIM.setJointTargetVelocity(PRISMATIC_JOINT, gripper_vel)
 
 
 # ---------------- Sensing ----------------
