@@ -30,29 +30,32 @@ def sysCall_init():
     state_feedback_gains = [-2.8404703083006493, -0.04011592828490343, 
                             -3.3368304906550407e-17, 2.2360679774997827]
     wheel_rad = 0.0215
-    velocity_limit = 225.0  
+    velocity_limit = 270.0  # Maximum angular velocity in rad/s
 
+    # Anti-windup integral control parameters
     ki_coefficient = 0.0
     pitch_error_sum = 0.0
     windup_threshold = 0.01
 
+    # Smoothed state variables
     desired_linear_vel = 0.0
     desired_angular_vel = 0.0
     smoothed_angular_rate = 0.0
     smoothed_wheel_angular_vel = 0.0
     last_tilt_angle = 0.0
 
-    rotation_command_scale = 1.5
-    translation_command_scale = 0.2
+    # Command scaling factors
+    rotation_command_scale = 4.0
+    translation_command_scale = 0.24
 
-    manipulator_velocity = 0.8
+    manipulator_velocity = 1.0
     gripper_velocity = 0.5
+
+    # Reset all actuators to zero velocity
     for joint in [left_wheel_joint, right_wheel_joint, gripper_actuator, manipulator_joint]:
         sim.setJointTargetVelocity(joint, 0)
     
-    print("Self-Balancing Robot System Online!")
-    print("Navigation: Arrow Keys or W/S (forward/back), Q/E (rotate)")
-    print("Manipulation: I/K (arm), O/L (gripper)")
+    print(f"w,s for forward/backward while q,e for turning left/right and i,k for raising/lowering the manipulator")
 
 
 def sysCall_actuation():
@@ -60,14 +63,17 @@ def sysCall_actuation():
     global desired_linear_vel, desired_angular_vel
     global rotation_command_scale, translation_command_scale, velocity_limit
 
+    # Process keyboard commands
     msg_type, msg_data, _ = simulation_api.getSimulatorMessage()
     
     if msg_type == simulation_api.message_keypress:
         pressed_key = msg_data[0]
         desired_linear_vel, desired_angular_vel = process_navigation_input(pressed_key)
 
+    # Compute stabilization control output
     base_wheel_command = calculate_stabilization_command()
 
+    # Apply differential drive and saturation
     left_cmd = constrain_value(base_wheel_command + desired_angular_vel, 
                                 -velocity_limit, velocity_limit)
     right_cmd = constrain_value(base_wheel_command - desired_angular_vel, 
@@ -76,6 +82,7 @@ def sysCall_actuation():
     simulation_api.setJointTargetVelocity(left_wheel_joint, left_cmd)
     simulation_api.setJointTargetVelocity(right_wheel_joint, right_cmd)
 
+    # Handle manipulator controls
     handle_manipulator_commands()
 
 
@@ -107,6 +114,7 @@ def handle_manipulator_commands():
     if msg_type == simulation_api.message_keypress:
         key = msg_data[0]
         
+        # Arm control
         arm_cmd = 0.0
         if key == 105:  # i
             arm_cmd = manipulator_velocity
@@ -114,6 +122,7 @@ def handle_manipulator_commands():
             arm_cmd = -manipulator_velocity
         simulation_api.setJointTargetVelocity(manipulator_joint, arm_cmd)
         
+        # Gripper control
         grip_cmd = 0.0
         if key == 111:  # o
             grip_cmd = gripper_velocity
@@ -121,52 +130,57 @@ def handle_manipulator_commands():
             grip_cmd = -gripper_velocity
         simulation_api.setJointTargetVelocity(gripper_actuator, grip_cmd)
 
-
 def sysCall_sensing():
     global simulation_api, chassis_handle, left_wheel_joint, right_wheel_joint
     global smoothed_angular_rate, smoothed_wheel_angular_vel, last_tilt_angle
     global pitch_error_sum, windup_threshold
 
+    # Retrieve chassis orientation in world frame
     euler_angles = simulation_api.getObjectOrientation(chassis_handle, -1)
     roll_world = euler_angles[0] if euler_angles else 0.0
     pitch_world = euler_angles[1] if euler_angles else 0.0
     yaw_world = euler_angles[2] if euler_angles else 0.0
 
+    # Get angular velocity and transform to body frame
     _, omega_world = simulation_api.getObjectVelocity(chassis_handle)
     
+    # Precompute trigonometric values
     cos_heading = cos_approx(-yaw_world)
     sin_heading = sin_approx(-yaw_world)
     
+    # Body-frame pitch rate (rotation about local X-axis)
     pitch_rate_body = (omega_world[0] * cos_heading - omega_world[1] * sin_heading)
     
+    # Compute body-frame tilt angle using atan2 approximation
     numerator = sin_approx(roll_world) * cos_approx(yaw_world) + sin_approx(pitch_world) * sin_approx(yaw_world)
     denominator = cos_approx(roll_world) * cos_approx(pitch_world)
     tilt_angle_body = atan2_approx(numerator, denominator)
 
+    # Read wheel encoders
     left_encoder = simulation_api.getJointVelocity(left_wheel_joint) or 0.0
     right_encoder = simulation_api.getJointVelocity(right_wheel_joint) or 0.0
     mean_wheel_rate = (left_encoder + right_encoder) * 0.5
 
+    # Apply exponential smoothing filters (alpha = 0.05)
     alpha = 0.05
     smoothed_angular_rate = smoothed_angular_rate * (1 - alpha) + pitch_rate_body * alpha
     smoothed_wheel_angular_vel = smoothed_wheel_angular_vel * (1 - alpha) + mean_wheel_rate * alpha
 
+    # Integral accumulation with anti-windup
     current_pitch_error = -tilt_angle_body
     pitch_error_sum = constrain_value(pitch_error_sum + current_pitch_error, 
                                        -windup_threshold, windup_threshold)
 
     last_tilt_angle = tilt_angle_body
 
-
 def sysCall_cleanup():
     global simulation_api, left_wheel_joint, right_wheel_joint
     try:
         simulation_api.setJointTargetVelocity(left_wheel_joint, 0)
         simulation_api.setJointTargetVelocity(right_wheel_joint, 0)
-        print("System shutdown - actuators disabled")
+        print("The run is done")
     except:
         pass
-
 
 def constrain_value(val, lower_bound, upper_bound):
     """Saturate value within specified bounds"""
@@ -175,28 +189,28 @@ def constrain_value(val, lower_bound, upper_bound):
 
 def sin_approx(angle):
     """Approximation of sine using Taylor series (for small angles)"""
-  
+    # Normalize angle to [-pi, pi]
     pi = 3.14159265359
     while angle > pi:
         angle -= 2 * pi
     while angle < -pi:
         angle += 2 * pi
     
-    
+    # Taylor series: sin(x) ? x - x³/6 + x?/120
     x2 = angle * angle
     return angle * (1.0 - x2 / 6.0 * (1.0 - x2 / 20.0))
 
 
 def cos_approx(angle):
     """Approximation of cosine using Taylor series"""
-   
+    # Normalize angle to [-pi, pi]
     pi = 3.14159265359
     while angle > pi:
         angle -= 2 * pi
     while angle < -pi:
         angle += 2 * pi
     
-  
+    # Taylor series: cos(x) ? 1 - x²/2 + x?/24
     x2 = angle * angle
     return 1.0 - x2 / 2.0 * (1.0 - x2 / 12.0)
 
@@ -216,7 +230,7 @@ def atan2_approx(y, x):
     abs_y = abs(y)
     abs_x = abs(x)
     
-    
+    # Use atan approximation for small values
     if abs_x > abs_y:
         ratio = y / x
         angle = ratio / (1.0 + 0.28 * ratio * ratio)
@@ -235,7 +249,7 @@ def atan2_approx(y, x):
 
 
 def calculate_stabilization_command():
-   
+    """Compute control action using state feedback with integral compensation"""
     global state_feedback_gains, wheel_rad, desired_linear_vel
     global smoothed_angular_rate, smoothed_wheel_angular_vel, last_tilt_angle
     global ki_coefficient, pitch_error_sum
@@ -244,13 +258,13 @@ def calculate_stabilization_command():
     tilt_rate = smoothed_angular_rate
     vel_tracking_error = desired_linear_vel - (smoothed_wheel_angular_vel * wheel_rad)
 
-   
+    # State feedback control law: u = -K*x
     feedback_term = (state_feedback_gains[0] * (-current_tilt) +
                      state_feedback_gains[1] * tilt_rate +
                      state_feedback_gains[2] * 0 +
                      state_feedback_gains[3] * vel_tracking_error)
 
-   
+    # Add integral compensation
     integral_compensation = ki_coefficient * pitch_error_sum
     control_output = feedback_term + integral_compensation
 
