@@ -30,7 +30,7 @@ def sysCall_init():
     state_feedback_gains = [-2.8404703083006493, -0.04011592828490343, 
                             -3.3368304906550407e-17, 2.2360679774997827]
     wheel_rad = 0.0215
-    velocity_limit = 270.0  # Maximum angular velocity in rad/s
+    velocity_limit = 180.0  # Maximum angular velocity in rad/s
 
     # Anti-windup integral control parameters
     ki_coefficient = 0.0
@@ -45,8 +45,8 @@ def sysCall_init():
     last_tilt_angle = 0.0
 
     # Command scaling factors
-    rotation_command_scale = 4.0
-    translation_command_scale = 0.24
+    rotation_command_scale = 1.5
+    translation_command_scale = 0.12
 
     manipulator_velocity = 1.0
     gripper_velocity = 0.5
@@ -55,7 +55,7 @@ def sysCall_init():
     for joint in [left_wheel_joint, right_wheel_joint, gripper_actuator, manipulator_joint]:
         sim.setJointTargetVelocity(joint, 0)
     
-    print(f"w,s for forward/backward while q,e for turning left/right and i,k for raising/lowering the manipulator")
+    print(f"w,s for forward/backward while q,e for turning left/right and h.n for raising/lowering the manipulator")
 
 
 def sysCall_actuation():
@@ -137,20 +137,11 @@ def handle_manipulator_commands():
         
        
         arm_cmd = 0.0
-        if key == 104:  #h key
+        if key == 104:  #h key for raising the arm
             arm_cmd = manipulator_velocity
-        elif key == 110: #n key
+        elif key == 110: #n key for lowering the arm
             arm_cmd = -manipulator_velocity
         simulation_api.setJointTargetVelocity(manipulator_joint, arm_cmd)
-        
-        grip_cmd = 0.0
-        if key == 106:  #j key
-            grip_cmd = gripper_velocity
-        elif key == 109: #m key
-            grip_cmd = -gripper_velocity
-        simulation_api.setJointTargetVelocity(gripper_actuator, grip_cmd)
-
-
 def sysCall_sensing():
     global simulation_api, chassis_handle, left_wheel_joint, right_wheel_joint
     global smoothed_angular_rate, smoothed_wheel_angular_vel, last_tilt_angle
