@@ -51,7 +51,7 @@ def sysCall_init():
     manipulator_velocity = 1.0
     gripper_velocity = 0.5
 
-    # Reset all actuators to zero velocity
+    
     for joint in [left_wheel_joint, right_wheel_joint, gripper_actuator, manipulator_joint]:
         sim.setJointTargetVelocity(joint, 0)
     
