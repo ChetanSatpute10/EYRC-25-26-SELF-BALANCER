@@ -3,17 +3,17 @@ Self-Balancing Robot LQR Controller for CoppeliaSim
 Converted from MuJoCo implementation
 Configured for Task_1B scene with body, right_joint, and left_joint
 """
-
-import math
-
 # LQR gains obtained from calculate_lqr_gains.py
 LQR_K = [-2.8404703083006493, -0.04011592828490343, -3.3368304906550407e-17, 2.2360679774997827]
 WHEEL_RADIUS = 0.0215
 MAX_MOTOR_VEL = 500.0  # rad/s
 
 def clamp(n, minn, maxn):
-    """Clamp value between min and max"""
-    return max(min(maxn, n), minn)
+   if n>maxn:
+       return maxn
+   elif n<minn:
+       return minn
+   return n
 
 def euler_from_quaternion(quat):
     """
@@ -195,68 +195,3 @@ def reset_controller():
     self.sim.setJointTargetVelocity(self.right_joint_handle, 0)
     
     print("Controller reset")
-
-
-"""
-SETUP INSTRUCTIONS FOR YOUR SCENE:
-===================================
-
-1. JOINT CONFIGURATION:
-   - Select 'left_joint' in scene hierarchy
-   - In joint properties, set:
-     * Joint mode: "Motor" (not "Force/Torque")
-     * Control loop: Enable "Velocity control"
-     * Motor enabled: Check this box
-     * Target velocity: 0 (will be set by script)
-     * Maximum torque: Set appropriate value (e.g., 10 N·m)
-   
-   - Repeat same settings for 'right_joint'
-
-2. BODY CONFIGURATION:
-   - 'body' should be:
-     * Dynamic and respondable
-     * Have appropriate mass and inertia
-     * Connected to wheels via the joints
-
-3. VERIFY WHEEL RADIUS:
-   - Your wheels appear to be N20_Wheel_D43_mm_v2_1
-   - Diameter = 43mm, so radius = 21.5mm = 0.0215m
-   - UPDATE THIS LINE if needed: WHEEL_RADIUS = 0.0215
-   - Current value is 0.034m - PLEASE VERIFY!
-
-4. TEST WHEEL DIRECTION:
-   - If robot moves backward when it should go forward, try:
-     self.wheel_velocity = (vel_left + vel_right) / 2.0
-   - Or swap the signs in setJointTargetVelocity
-
-5. ATTACH THIS SCRIPT:
-   - Right-click on any object (e.g., 'body' or 'Script')
-   - Add -> Associated child script -> Non-threaded
-   - Paste this entire code
-   - Start simulation
-
-USAGE:
-======
-- Robot will automatically balance when simulation starts
-- To move forward: set_velocity_linear_set_point(0.5)
-- To turn: set_yaw(2.0)
-- To stop: set_velocity_linear_set_point(0) and set_yaw(0)
-
-TROUBLESHOOTING:
-================
-1. Robot falls immediately:
-   - Check WHEEL_RADIUS matches your actual wheel radius
-   - Verify joint modes are set to "Motor" with velocity control
-   - Check that body has reasonable mass/inertia
-
-2. Robot oscillates:
-   - Filter constants may need adjustment (try 0.95/0.05 instead of 0.975/0.025)
-   - LQR gains may need retuning for your specific robot parameters
-
-3. Robot moves in wrong direction:
-   - Flip signs in wheel_velocity calculation or setJointTargetVelocity
-
-4. Motors don't respond:
-   - Verify max torque is set high enough in joint properties
-   - Check that motor is enabled in joint settings
-"""
