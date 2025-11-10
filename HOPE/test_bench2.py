@@ -3,7 +3,6 @@ import numpy as np
 class LQRController:
     
     def __init__(self, A, B, Q, R):
-
         self.A = A
         self.B = B
         self.Q = Q
@@ -13,7 +12,6 @@ class LQRController:
         self.eigvals = None
         
     def solve_continuous_are(self):
-
         n = self.A.shape[0]
         R_inv = np.linalg.inv(self.R)
         R_inv_BT = R_inv @ self.B.T
@@ -25,27 +23,22 @@ class LQRController:
         
         eigvals, eigvecs = np.linalg.eig(H)
         
-    
         idx = np.argsort(np.real(eigvals))
         eigvals = eigvals[idx]
         eigvecs = eigvecs[:, idx]
         
-
         stable_eigvecs = eigvecs[:, :n]
         U1 = stable_eigvecs[:n, :]
         U2 = stable_eigvecs[n:, :]
         
-   
         X = np.real(U2 @ np.linalg.inv(U1))
         X = (X + X.T) / 2  
         
         return X
     
     def compute_gain(self):
-
         self.X = self.solve_continuous_are()
         
-  
         R_inv = np.linalg.inv(self.R)
         self.K = R_inv @ self.B.T @ self.X
 
@@ -71,12 +64,18 @@ class LQRController:
             self.compute_gain()
         return np.all(np.real(self.eigvals) < 0)
 
+# System parameters
 g = 9.81
 m = 0.264
 l = 0.0335
 r = 0.0215
 max_velocity = 1.0
 THROTTLE_GAIN = 1.0
+
+# Robot physical parameters
+WHEEL_RADIUS = 0.0215  # meters
+WHEEL_BASE = 0.1       # meters (distance between wheels)
+
 A = np.array([[0, 1, 0, 0],
               [g/l, 0, 0, 0],
               [0, 0, 0, 1],
@@ -89,10 +88,10 @@ B = np.array([[0],
 
 Q = np.diag([0.7, 0.0, 0.0, 2.5])
 R = np.array([[0.5]])
+
+# Create LQR controller instance
 lqr_controller = LQRController(A, B, Q, R)
 K, X, eigvals = lqr_controller.compute_gain()
-
-
 
 class contrained_vel:
     def __init__(self, min_vel, max_vel):
@@ -233,9 +232,13 @@ def transform_angular_velocity_to_local(ang_vel_global, yaw_angle):
 def sysCall_init():
     sim = require('sim')
     
-    global vel_control , K_MAT
+    global vel_control, K_MAT
     vel_control = contrained_vel(-180, 180)
-    K_MAT = LQRController.get_gain()
+    
+    # FIX: Use the instance, not the class
+    K_MAT = lqr_controller.get_gain()[0]  # Get the gain matrix (returns flattened array)
+    
+    self.sim = sim  # Store sim reference
     self.body_handle = sim.getObject('/body') 
     self.left_joint_handle = sim.getObject('/left_joint')  
     self.right_joint_handle = sim.getObject('/right_joint')  
@@ -269,8 +272,8 @@ def sysCall_init():
     self.kf_forward_vel = KalmanFilter1D(process_variance=0.00001, measurement_variance=0.001)
     self.kf_wheel_vel = KalmanFilter1D(process_variance=0.00001, measurement_variance=0.001)
     
-    self.sim = sim
     print("Bot initialized - Using LOCAL frame with keyboard control (Arrow keys)")
+    print(f"K_MAT: {K_MAT}")
     
 def sysCall_sensing(): 
     # Get orientation in GLOBAL frame
@@ -305,7 +308,7 @@ def sysCall_sensing():
     self.right_wheel_vel = self.sim.getJointVelocity(self.right_joint_handle)
 
 def sysCall_actuation():
-    global vel_control
+    global vel_control, K_MAT
     
     ############### Keyboard Input ##############
     # Reset targets to zero (stop if no key is pressed)
@@ -377,9 +380,10 @@ def sysCall_actuation():
     self.sim.setJointTargetVelocity(self.right_joint_handle, right_wheel_cmd_final)
 
 def sysCall_cleanup():
-    self.sim.setJointTargetVelocity(self.left_joint_handle, 0)
-    self.sim.setJointTargetVelocity(self.right_joint_handle, 0)
-    print("Controller stopped")
+    if hasattr(self, 'sim') and hasattr(self, 'left_joint_handle'):
+        self.sim.setJointTargetVelocity(self.left_joint_handle, 0)
+        self.sim.setJointTargetVelocity(self.right_joint_handle, 0)
+        print("Controller stopped")
 
 def reset_controller():
     self.kf_pitch_rate = KalmanFilter1D(process_variance=0.00001, measurement_variance=0.001)
@@ -392,6 +396,7 @@ def reset_controller():
     self.target_forward_velocity = 0.0
     self.target_angular_velocity = 0.0
     
-    self.sim.setJointTargetVelocity(self.left_joint_handle, 0)
-    self.sim.setJointTargetVelocity(self.right_joint_handle, 0)
-    print("Controller reset")
+    if hasattr(self, 'sim') and hasattr(self, 'left_joint_handle'):
+        self.sim.setJointTargetVelocity(self.left_joint_handle, 0)
+        self.sim.setJointTargetVelocity(self.right_joint_handle, 0)
+        print("Controller reset")
