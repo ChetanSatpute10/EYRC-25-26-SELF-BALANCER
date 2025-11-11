@@ -109,8 +109,6 @@ class contrained_vel:
             self._cmd_vel = value
         return self._cmd_vel
 
-    
-
 class KalmanFilter1D:
 
     def __init__(self, process_variance=0.00001, measurement_variance=0.001):
@@ -235,34 +233,53 @@ def sysCall_init():
     self.arm_handle_joint = sim.getObject('/arm_joint')
     self.gripper_joint = sim.getObject('/Prismatic_joint')
     
-    self.pitch_local = 0.0
-    self.pitch_rate_local = 0.0
-    self.pitch_rate_filtered = 0.0
-    
-    self.yaw_angle = 0.0
-    
     self.forward_velocity_local = 0.0
-    self.forward_velocity_filtered = 0.0
-    
-    self.left_wheel_vel = 0.0
-    self.right_wheel_vel = 0.0
-    self.wheel_vel_avg_filtered = 0.0
-    
-    self.target_forward_velocity = 0.0
-    self.target_angular_velocity = 0.0 
-    
-    self.forward_speed = 0.5  
-    self.turn_rate = 1.0     
 
-    self.drop_up_speed = 1.2
-    self.grab_speed = 1.0
     
+    # smoothing variables (exponential smoothing like reference)
+    self.smoothed_angular_rate = 0.0
+    self.smoothed_wheel_angular_vel = 0.0
+    self.last_tilt_angle = 0.0
+    
+    # filtered values (Kalman kept but not used for pitch_rate/wheel - we use exp smoothing to match reference)
     self.kf_pitch_rate = KalmanFilter1D(process_variance=0.00001, measurement_variance=0.001)
     self.kf_forward_vel = KalmanFilter1D(process_variance=0.00001, measurement_variance=0.001)
     self.kf_wheel_vel = KalmanFilter1D(process_variance=0.00001, measurement_variance=0.001)
     
-    print("Bot initialized - Using LOCAL frame with keyboard control (Arrow keys)")
+    # wheel + motion state
+# wheel + motion state
+    self.left_wheel_vel = 0.0
+    self.right_wheel_vel = 0.0
+    self.wheel_vel_avg_filtered = 0.0
+    self.forward_velocity_local = 0.0   # ? prevents AttributeError
+
     
+    # command targets
+    self.target_forward_velocity = 0.0
+    self.target_angular_velocity = 0.0 
+    
+    # tuning from reference: small forward translation scale
+    self.forward_speed = 0.12   # translation_command_scale (keeps lean small)
+    self.turn_rate = 1.5        # rotation_command_scale
+    
+    # manipulator speeds
+    self.drop_up_speed = 1.2
+    self.grab_speed = 1.0
+    
+    # integration state
+    self.current_position = 0.0
+    self.last_time = sim.getSimulationTime()
+    
+    # smoothing alpha (match reference)
+    self._alpha = 0.05
+    
+    # integral anti-windup
+    self.pitch_error_sum = 0.0
+    self.windup_threshold = 0.01
+    self.ki_coefficient = 0.0
+    
+    print("Bot initialized - Using LOCAL frame with keyboard control (Arrow keys)")
+
 def sysCall_sensing(): 
     orientation_global = self.sim.getObjectOrientation(self.body_handle, -1)
     roll_global = orientation_global[0]
@@ -274,18 +291,38 @@ def sysCall_sensing():
     vel_local = transform_velocity_to_local_frame(lin_vel_global, self.yaw_angle)
     self.forward_velocity_local = vel_local[0] 
     
-    self.pitch_rate_local = transform_angular_velocity_to_local(ang_vel_global, self.yaw_angle)
+    # compute pitch rate in local frame (same transform as reference)
+    pitch_rate_body = transform_angular_velocity_to_local(ang_vel_global, self.yaw_angle)
     
     cos_yaw = cos(self.yaw_angle)
     sin_yaw = sin(self.yaw_angle)
     
-    self.pitch_local = atan2(
+    # local tilt angle computation (matches reference)
+    tilt_angle_body = atan2(
         sin(roll_global) * cos_yaw + sin(pitch_global) * sin_yaw,
         cos(roll_global) * cos(pitch_global)
     )
     
-    self.left_wheel_vel = self.sim.getJointVelocity(self.left_joint_handle)
-    self.right_wheel_vel = self.sim.getJointVelocity(self.right_joint_handle)
+    # read wheel velocities safely
+    left_vel = self.sim.getJointVelocity(self.left_joint_handle) or 0.0
+    right_vel = self.sim.getJointVelocity(self.right_joint_handle) or 0.0
+    mean_wheel_rate = 0.5 * (left_vel + right_vel)
+    
+    # exponential smoothing (reference behavior)
+    alpha = self._alpha
+    self.smoothed_angular_rate = self.smoothed_angular_rate * (1.0 - alpha) + pitch_rate_body * alpha
+    self.smoothed_wheel_angular_vel = self.smoothed_wheel_angular_vel * (1.0 - alpha) + mean_wheel_rate * alpha
+    
+    # anti-windup accumulation (bounded)
+    current_pitch_error = -tilt_angle_body
+    self.pitch_error_sum = max(-self.windup_threshold, min(self.windup_threshold, self.pitch_error_sum + current_pitch_error))
+    
+    # store last tilt (used in control)
+    self.last_tilt_angle = tilt_angle_body
+    
+    # also update raw wheel values for other uses
+    self.left_wheel_vel = left_vel
+    self.right_wheel_vel = right_vel
 
 def arm_interrupt():
     self.target_arm_speed = 0.0
@@ -300,67 +337,77 @@ def arm_interrupt():
         elif data[0] == 32:
             self.target_arm_speed = 0.0
             print("stopping the arm")
-        self.sim.setJointTargetVelocity(self.arm_handle_joint, target_arm_speed)
+        # fixed bug - use self.target_arm_speed
+        self.sim.setJointTargetVelocity(self.arm_handle_joint, self.target_arm_speed)
 
 
 def sysCall_actuation():
     global vel_control, K_MAT
-    self.last_time = 0.0
-    self.current_position = 0.0
+    # DO NOT reset last_time or current_position here (was breaking dt)
     
     # Get current time for integration
     current_time = sim.getSimulationTime()
     dt = current_time - self.last_time
+    # guard dt in case sim time jumps
+    if dt <= 0:
+        dt = 0.0
     self.last_time = current_time
     
-    self.target_forward_velocity = 0.0
-    self.target_angular_velocity = 0.0
-    # Handle keyboard - DON'T reset velocities
+    # default targets - don't zero them here; only set if keypress
+    # this preserves previous targets if no key is pressed
     message, data, data2 = self.sim.getSimulatorMessage()
     if message == self.sim.message_keypress:
-        if data[0] == 2007:
+        if data[0] == 2007:    # up
             self.target_forward_velocity = self.forward_speed
-        elif data[0] == 2008:
+        elif data[0] == 2008:  # down
             self.target_forward_velocity = -self.forward_speed
-        elif data[0] == 2009:
+        elif data[0] == 2009:  # left
             self.target_angular_velocity = self.turn_rate
-        elif data[0] == 2010:
+        elif data[0] == 2010:  # right
             self.target_angular_velocity = -self.turn_rate
-        elif data[0] == 32:
-            self.target_forward_velocity = 0.0  # Space to stop
+        elif data[0] == 32:    # space
+            self.target_forward_velocity = 0.0
+            self.target_angular_velocity = 0.0
     
-    # Apply Kalman filters
-    self.pitch_rate_filtered = self.kf_pitch_rate.update(self.pitch_rate_local)
-    self.forward_velocity_filtered = self.kf_forward_vel.update(self.forward_velocity_local)
+
     
-    avg_wheel_vel = (self.left_wheel_vel + self.right_wheel_vel) / 2.0
-    self.wheel_vel_avg_filtered = self.kf_wheel_vel.update(avg_wheel_vel)
+    # Use the smoothed signals (exponential smoothing) for control - matches reference
+    self.pitch_rate_filtered = self.smoothed_angular_rate
+    self.wheel_vel_avg_filtered = self.smoothed_wheel_angular_vel
     
-    # Update position
-    self.current_position += self.forward_velocity_filtered * dt
+    # Update position integration using filtered forward velocity
+    # forward_velocity_local is in m/s already (transformed earlier)
+    self.current_position += getattr(self, "forward_velocity_local", 0.0) * dt
+
     
     # Compute errors
     velocity_error = self.target_forward_velocity - (self.wheel_vel_avg_filtered * WHEEL_RADIUS)
-    position_error = 0.0 - self.current_position  # Want to stay at origin
+    position_error = 0.0 - self.current_position  # Want to stay at origin (optional)
     
-    # LQR state vector
-    x1 = 0.0 - self.pitch_local        # Pitch error
-    x2 = -self.pitch_rate_filtered      # Pitch rate
-    x3 = position_error                 # FIXED: Use actual position
-    x4 = velocity_error                 # Velocity error
+    # LQR state vector (use tilt from sensing stored in last_tilt_angle)
+    x1 = 0.0 - self.last_tilt_angle        # Pitch error (tilt)
+    x2 = -self.pitch_rate_filtered        # Pitch rate (smoothed)
+    x3 = position_error
+    x4 = velocity_error
     
-    # Compute control
+    # Compute LQR-like control (matches reference's feedback_term)
     lqr_control_signal = (K_MAT[0] * x1 + 
                           K_MAT[1] * x2 + 
                           K_MAT[2] * x3 + 
                           K_MAT[3] * x4)
     
-    wheel_cmd_base = -lqr_control_signal / WHEEL_RADIUS
+    # Add small integral compensation if desired (ki_coefficient default 0)
+    integral_comp = self.ki_coefficient * self.pitch_error_sum
+    total_control = lqr_control_signal + integral_comp
+    
+    # Convert to wheel base command and differential turning (same mapping as reference)
+    wheel_cmd_base = -total_control / WHEEL_RADIUS
     turn_differential = (self.target_angular_velocity * WHEEL_BASE) / (2.0 * WHEEL_RADIUS)
     
-    left_wheel_cmd = wheel_cmd_base - turn_differential
-    right_wheel_cmd = wheel_cmd_base + turn_differential
+    left_wheel_cmd = wheel_cmd_base + turn_differential
+    right_wheel_cmd = wheel_cmd_base - turn_differential
     
+    # Saturate using same velocity limit behavior
     left_wheel_cmd_final = vel_control.set_speed(left_wheel_cmd)
     right_wheel_cmd_final = vel_control.set_speed(right_wheel_cmd)
     
