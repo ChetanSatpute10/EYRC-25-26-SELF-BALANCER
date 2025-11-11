@@ -96,9 +96,10 @@ K, X, eigvals = lqr_controller.compute_gain()
 class contrained_vel:
     def __init__(self, min_vel, max_vel):
         self._cmd_vel = 0
+        self._arm_speed = 0
         self.min_vel = min_vel
         self.max_vel = max_vel
-    
+    #for drive speed
     def get_speed(self):
         return self._cmd_vel
     
@@ -110,6 +111,8 @@ class contrained_vel:
         else:
             self._cmd_vel = value
         return self._cmd_vel
+
+    
 
 class KalmanFilter1D:
     """Simple 1D Kalman filter for single variable estimation"""
@@ -242,6 +245,8 @@ def sysCall_init():
     self.body_handle = sim.getObject('/body') 
     self.left_joint_handle = sim.getObject('/left_joint')  
     self.right_joint_handle = sim.getObject('/right_joint')  
+    self.arm_handle_joint = sim.getObject('/arm_joint')
+    self.gripper_joint = sim.getObject('/Prismatic_joint')
     
     # State variables in LOCAL robot frame
     self.pitch_local = 0.0
@@ -266,6 +271,10 @@ def sysCall_init():
     # Keyboard control parameters
     self.forward_speed = 0.5  # m/s when moving forward
     self.turn_rate = 1.0      # rad/s when turning
+
+    #manipulators init
+    self.drop_up_speed = 1.2
+    self.grab_speed = 1.0
     
     # Initialize Kalman filters for each variable
     self.kf_pitch_rate = KalmanFilter1D(process_variance=0.00001, measurement_variance=0.001)
@@ -307,6 +316,22 @@ def sysCall_sensing():
     self.left_wheel_vel = self.sim.getJointVelocity(self.left_joint_handle)
     self.right_wheel_vel = self.sim.getJointVelocity(self.right_joint_handle)
 
+def arm_interrupt():
+    self.target_arm_speed = 0.0
+    message, data, data2 = self.sim.getSimulatorMessage()
+    if message == self.sim.message_keypress:
+        if data[0] == 119:  # Left arrow key (turn left)
+            self.target_arm_speed = self.drop_up_speed
+            print("lowering the arm")
+        elif data[0] == 115:  # Right arrow key (turn right)
+            self.target_arm_speed = -self.drop_up_speed
+            print("lifting the arm")
+        elif data[0] == 32:
+            self.target_arm_speed = 0.0
+            print("stopping the arm")
+        self.sim.setJointTargetVelocity(self.arm_handle_joint, target_arm_speed)
+
+
 def sysCall_actuation():
     global vel_control, K_MAT
     
@@ -314,7 +339,10 @@ def sysCall_actuation():
     # Reset targets to zero (stop if no key is pressed)
     self.target_forward_velocity = 0.0
     self.target_angular_velocity = 0.0
+    self.target_arm_speed = 0.0
     
+    # FOR DRIVE
+
     message, data, data2 = self.sim.getSimulatorMessage()
     if message == self.sim.message_keypress:
         if data[0] == 2007:  # Forward (up arrow)
@@ -329,6 +357,7 @@ def sysCall_actuation():
         elif data[0] == 2010:  # Right arrow key (turn right)
             self.target_angular_velocity = -self.turn_rate
             print("Turning Right")
+
     #########################################
     
     # Apply Kalman filtering to LOCAL frame measurements
@@ -357,25 +386,16 @@ def sysCall_actuation():
                           K_MAT[2] * x3 + 
                           K_MAT[3] * x4)
     
-    # Convert to wheel velocity command (base command for both wheels)
     wheel_cmd_base = -lqr_control_signal / WHEEL_RADIUS
-    
-    # === DIFFERENTIAL DRIVE for turning ===
-    # Angular velocity produces differential wheel speeds
-    # w = (v_right - v_left) / wheel_base
-    # Rearranging: v_left = v_base - (wheel_base * w) / 2
-    #              v_right = v_base + (wheel_base * w) / 2
     
     turn_differential = (self.target_angular_velocity * WHEEL_BASE) / (2.0 * WHEEL_RADIUS)
     
     left_wheel_cmd = wheel_cmd_base - turn_differential
     right_wheel_cmd = wheel_cmd_base + turn_differential
-    
     # Constrain output for each wheel
     left_wheel_cmd_final = vel_control.set_speed(left_wheel_cmd)
     right_wheel_cmd_final = vel_control.set_speed(right_wheel_cmd)
-    
-    # Apply to motors
+    arm_interrupt()
     self.sim.setJointTargetVelocity(self.left_joint_handle, left_wheel_cmd_final)
     self.sim.setJointTargetVelocity(self.right_joint_handle, right_wheel_cmd_final)
 
